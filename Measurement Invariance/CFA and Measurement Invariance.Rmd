@@ -1,0 +1,385 @@
+---
+title: "CFA and Measurement Invariance"
+author: "Lauren Alvis"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+---
+#  Objective  
+  
+This report represents my expertise in conducting advanced statistical analyses, specifically Confirmatory Factor Analysis (CFA) and Measurement Invariance Testing. The goal of this analysis was to evaluate the psychometric properties of the Grief Facilitation Inventory (GFI) and assess whether the scale operates equivalently across key demographic subgroups, including race, gender, and age.  
+   
+The analysis demonstrates my skills in:  
+- Structural equation modeling,  
+- Evaluating psychometric properties and measurement invariance, and  
+- Presenting complex results in a clear and organized manner.  
+  
+In addition to the statistical techniques employed, this project also demonstrates my ability to:   
+- **Create reusable functions**: I wrote functions to automate and simplify the process of running CFA models, extracting fit indices, and generating standardized factor loading tables across multiple subgroups.   
+- **Ensure reproducibility**: By writing modular code, I ensured that this analysis can be easily adapted for different datasets or subgroups in the future, demonstrating my commitment to efficient, scalable research practices.  
+  
+# Methods
+ 
+The GFI is a 24-item measure designed to evaluate the frequency of caregiver grief facilitation behaviors during the past month. Youth provided reports of caregiver behaviors on a 5-point frequency scale ranging from 0 (not at all) to 4 (all the time).   
+  
+The GFI consists of the following subscales:  
+-  **Ongoing Connection** (7 items): GFI_10, GFI_11, GFI_13, GFI_34, GFI_4, GFI_21, GFI_12  
+-  **Existential Continuity and Support** (8 items): GFI_27, GFI_16, GFI_29, GFI_36, GFI_17, GFI_22, GFI_30, GFI_31  
+-  **Caregiver Grief Expression** (4 items): GFI_3, GFI_2, GFI_6, GFI_1  
+  
+# Setup
+
+```{r setup, echo=TRUE, results=FALSE, warning=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo=FALSE,warning=FALSE,message=FALSE)
+
+# Load libraries
+library(rio) # import data
+library(dplyr) # manipulate data
+library(janitor) # tabyl function
+library(lavaan) # SEM
+library(semTools) # measEq.syntax
+library(knitr) # tables
+library(tidyr) # manipulate tidy data
+library(flextable) # word doc tables
+library(officer) # tables
+library(semPlot) # plot cfa
+library(semptools) # customize cfa plot
+```
+
+```{r}
+# read in data
+import("GFI.sav")
+
+# Subset datasets for each group
+datasets <- list(
+  full_sample = GFI,
+  black_youth = GFI %>% filter(racegrp == "Black"),
+  latinx_youth = GFI %>% filter(racegrp == "Latinx"),
+  white_youth = GFI %>% filter(racegrp == "White"),
+  mixed_youth = GFI %>% filter(racegrp == "Mixed"),
+  boys = GFI %>% filter(gend == "Boy"),
+  girls = GFI %>% filter(gend == "Girl"),
+  school_age = GFI %>% filter(agegrp == "School age"),
+  preadolescent = GFI %>% filter(agegrp == "Preadol"),
+  adolescent = GFI %>% filter(agegrp == "Adol")
+)
+
+group_names <- c("Full Sample", "Black Youth", "Latinx Youth", "White Youth", "Mixed Youth", "Boys", "Girls", "School Age", "Preadolescent", "Adolescent")
+
+```
+
+#  CFA for 3-factor model
+
+## Model Specification 
+
+```{r cfa3, echo=TRUE}
+# Define factors and indicators
+mod.cat3 <- 'connect =~ GFI_10 + GFI_11 + GFI_13 + GFI_34 + GFI_4 + GFI_21 + GFI_12
+
+contsupp =~ GFI_27 + GFI_16 + GFI_29 + GFI_36 + GFI_17 + GFI_22 + GFI_30 + GFI_31
+
+griefexp =~ GFI_3 + GFI_2 + GFI_6 + GFI_1'
+```
+
+## Fit CFA 
+
+```{r run cfa, echo=TRUE}
+# Define a function to run CFA for each group in the datasets
+run_cfa_for_groups <- function(datasets, model_syntax) {
+  fit_results <- list() # Store the fit results for each group
+  
+  for (group_name in names(datasets)) {
+    data <- datasets[[group_name]] # Get the corresponding dataset
+    
+    # Apply measurement equivalence syntax and fit the CFA model
+    mod <- measEq.syntax(configural.model = model_syntax, 
+                         data = data, 
+                         ordered = TRUE,
+                         parameterization = "theta",
+                         auto.fix.first = FALSE,
+                         ID.fac = "marker",
+                         ID.cat = "millsap")
+    
+    # Convert model to character string
+    model_string <- as.character(mod)
+    
+    # Fit the model using cfa
+    fit <- cfa(model_string, data = data, ordered = TRUE)
+    
+    # Store the fit object in the results list
+    fit_results[[group_name]] <- fit
+  }
+  
+  return(fit_results) # Return the list of fitted models
+}
+
+# run the CFA for all groups
+fit_results_3factor <- run_cfa_for_groups(datasets, mod.cat3)
+
+```
+
+## Model Fit Indices 
+
+> **Interpreting Fit Statistics:**  
+> Model fit indices such as Chi-Square, RMSEA, CFI, and TLI provide insight into how well the model fits the data. In this section, I compare model fit across different groups, which is important for ensuring that the GFI's structure is similarly understood across diverse populations.
+
+
+**Table 1.** Model fit statistics of the single-group confirmatory factor analysis for the three-factor solution.
+
+```{r modfit, results='asis'}
+# p value function 
+p_val_format <- function(x){
+  z <- scales::pvalue_format()(x)
+  z[!is.finite(x)] <- ""
+  z
+}
+# Create an empty list to store the fit indices for each group
+fit_indices_list <- list()
+
+# Define a function to extract fit indices for each model
+extract_fit_indices <- function(fit) {
+  fitmeasures(fit, fit.measures = c("chisq.scaled", "df.scaled", "pvalue.scaled", 
+                                    "rmsea.scaled", "rmsea.ci.lower.scaled", 
+                                    "rmsea.ci.upper.scaled", "tli.scaled", 
+                                    "cfi.scaled"))
+}
+
+# Loop through each group in fit_results_3factor and extract the fit indices
+for (group_name in names(fit_results_3factor)) {
+  fit_indices <- extract_fit_indices(fit_results_3factor[[group_name]])
+  
+  # Convert fit indices into a data frame without transposing
+  fit_indices_df <- as.data.frame(as.list(fit_indices))
+  
+  # Add the group name
+  fit_indices_df$Sample <- group_name
+  
+  # Append the fit indices data frame to the list
+  fit_indices_list[[group_name]] <- fit_indices_df
+}
+
+# Combine all fit indices into a single data frame
+fit_indices_table <- bind_rows(fit_indices_list)
+
+# Reorder columns to place 'Sample' as the first column
+fit_indices_table <- fit_indices_table %>%
+  select(Sample, everything())
+
+
+# Rename the columns for clarity
+colnames(fit_indices_table) <- c("Sample", "X2", "df", "p", "RMSEA", "Lower RMSEA", "Upper RMSEA", "TLI", "CFI")
+
+# Create a flextable to display the results
+fit_table_flex <- fit_indices_table %>%
+  flextable(col_keys = c("Sample", "X2", "df", "p", "RMSEA", "Lower RMSEA", "Upper RMSEA", "TLI", "CFI")) %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 10, part = "all") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  set_formatter(values = list(
+    "p" = p_val_format, # Use the custom p-value format function
+    "X2" = function(x) sprintf("%.02f", x),
+    "RMSEA" = function(x) sprintf("%.3f", x),
+    "Lower RMSEA" = function(x) sprintf("%.3f", x),
+    "Upper RMSEA" = function(x) sprintf("%.3f", x),
+    "CFI" = function(x) sprintf("%.3f", x),
+    "TLI" = function(x) sprintf("%.3f", x)
+  ))
+
+# Display the flextable
+fit_table_flex
+
+```
+
+
+
+## Factor Loadings Table 
+
+> **Understanding Factor Loadings:**  
+> The standardized factor loadings indicate how well each item represents the underlying construct (i.e., the subscale). Higher loadings suggest that an item is a stronger indicator of the latent factor. This section provides a comparison of factor loadings across demographic subgroups to ensure that the items work well together in all subgroups. 
+
+
+**Table 2.** Standardized factor loadings for three-factor GFI among full sample and subgroups.
+
+```{r loadingstable, results='asis'}
+# Create an empty list to store the factor loadings for each group
+factor_loadings_list <- list()
+
+# Define a function to extract and format factor loadings, with rounding
+extract_factor_loadings <- function(fit, group_name) {
+  parameterEstimates(fit, standardized = TRUE) %>%
+    filter(op == "=~") %>%
+    select('Latent Factor' = lhs, Indicator = rhs, Beta = std.all) %>%
+    mutate(Beta = round(Beta, 2),  
+           Subgroup = group_name) 
+}
+
+# Loop through each group in fit_results_3factor and extract the factor loadings
+for (group_name in names(fit_results_3factor)) {
+  factor_loadings <- extract_factor_loadings(fit_results_3factor[[group_name]], group_name)
+  factor_loadings_list[[group_name]] <- factor_loadings
+}
+
+# Combine all factor loadings into a single data frame
+combined_factor_loadings <- bind_rows(factor_loadings_list)
+
+# Pivot the data to get the desired format (wide format for factor loadings)
+pivot_table <- combined_factor_loadings %>%
+  pivot_wider(names_from = Subgroup, values_from = Beta)
+
+# Set column names (adjust based on your groups)
+cols <- c("Latent Factor", "Item", "Full Sample", "Boys", "Girls", "Latinx", "Black", 
+          "Multiracial", "White", "School-age", "Pre-adolescent", "Adolescent")
+colnames(pivot_table) <- cols
+
+# Create a flextable to display the factor loadings
+factor_loadings_flex <- pivot_table %>%
+  as_grouped_data(groups = "Latent Factor") %>%
+  flextable() %>% 
+  font(fontname = "Times New Roman", part = "all") %>% 
+  fontsize(size = 10, part = "all") %>%
+  theme_booktabs() %>% 
+  autofit() %>%
+  merge_at(i = 1, j = 1:12) %>%
+  merge_at(i = 9, j = 1:12) %>%
+  merge_at(i = 18, j = 1:12)
+
+# print table
+factor_loadings_flex
+
+
+```
+
+# Measurement Invariance
+
+Measurement invariance was tested to ensure that the GFI operates equivalently across different groups, including race, gender, and age. Invariance was assessed at three levels:
+
+- **Configural Invariance**: Tests whether the basic factor structure holds across groups.
+- **Metric Invariance**: Tests whether factor loadings are equal across groups.
+- **Scalar Invariance**: Tests whether item intercepts are equal across groups.
+
+The results of these tests tell us whether the GFI can be used to compare youth across race, gender, and age. If measurement invariance holds, we can confidently compare scores across groups, knowing that differences in scores reflect true differences in experiences rather than differences in how the tool functions.
+
+## Race Invariance
+
+```{r race invar, echo=TRUE}
+# Define a function for model setup and fitting
+run_invariance_model <- function(model, data, group_var, group_equal, label) {
+  # Setup measurement equivalence syntax
+  mod_eq <- measEq.syntax(
+    configural.model = model, 
+    data = data, 
+    ordered = TRUE,
+    parameterization = "theta",
+    auto.fix.first = FALSE,
+    ID.fac = "marker",
+    ID.cat = "millsap",
+    meanstructure = TRUE,
+    group = group_var,
+    group.equal = group_equal
+  )
+  
+  # Fit the model using lavaan's CFA
+  fit <- cfa(as.character(mod_eq), data = data, group = group_var, ordered = TRUE)
+  
+  # Print the status for debugging
+  cat(paste0(label, " Model Fit Completed\n"))
+  
+  return(fit)
+}
+
+# Configural Invariance
+fit.c <- run_invariance_model(model=mod.cat3, data = GFI, group_var = "racegrp", 
+  group_equal = "configural", label = "Configural")
+
+# Threshold Invariance
+fit.t <- run_invariance_model(model = mod.cat3, data = GFI, group_var = "racegrp", 
+  group_equal = "thresholds", label = "Threshold")
+
+# Scalar Invariance (Thresholds + Loadings)
+fit.s <- run_invariance_model(model = mod.cat3, data = GFI, group_var = "racegrp", 
+  group_equal = c("thresholds", "loadings"), 
+  label = "Scalar (Threshold + Loadings)")
+
+```
+
+```{r invartable,message=FALSE, warning=FALSE}
+# Function to extract and format model fit indices
+extract_fit_indices <- function(fit, label) {
+  fitmeasures(fit, c("chisq", "df", "pvalue", "rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "tli", "cfi")) %>%
+    as.data.frame() %>%
+    rename(Value = 1) %>%  # Rename the unnamed column to "Value"
+    mutate(Model = label) %>%
+    tibble::rownames_to_column(var = "Fit_Measure")
+}
+# Extract fit indices for each model
+fit_configural <- extract_fit_indices(fit.c, "Configural")
+fit_threshold <- extract_fit_indices(fit.t, "Threshold")
+fit_scalar <- extract_fit_indices(fit.s, "Scalar")
+
+# Combine fit indices into one table
+fit_indices_table <- bind_rows(fit_configural, fit_threshold, fit_scalar)
+
+# Pivot the table to have fit measures as columns
+fit_indices_transposed <- fit_indices_table %>%
+  pivot_wider(names_from = Fit_Measure, values_from = Value)
+
+# Create a nicely formatted flextable for the transposed table
+fit_indices_flextable <- flextable(fit_indices_transposed) %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 10, part = "all") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  set_header_labels(
+    Model = "Model Type",
+    chisq = "Chi-Squared",
+    df = "Degrees of Freedom",
+    pvalue = "P-Value",
+    rmsea = "RMSEA",
+    rmsea.ci.lower = "RMSEA Lower CI",
+    rmsea.ci.upper = "RMSEA Upper CI",
+    tli = "TLI",
+    cfi = "CFI"
+  ) %>%
+  set_formatter(values = list(
+    "chisq" = function(x) sprintf("%.3f", as.numeric(x)),
+    "df" = function(x) sprintf("%.0f", as.numeric(x)),
+    "pvalue" = function(x) sprintf("%.3f", as.numeric(x)),
+    "rmsea" = function(x) sprintf("%.3f", as.numeric(x)),
+    "rmsea.ci.lower" = function(x) sprintf("%.3f", as.numeric(x)),
+    "rmsea.ci.upper" = function(x) sprintf("%.3f", as.numeric(x)),
+    "tli" = function(x) sprintf("%.3f", as.numeric(x)),
+    "cfi" = function(x) sprintf("%.3f", as.numeric(x))
+  ))
+
+# Display the flextable
+fit_indices_flextable
+```
+
+*Note.* Due to the large size of the sample and the sensitivity of the chi-square difference test to sample-size (Meade et. al., 2008; Milfont & Fischer, 2010), ΔCFI > .010 in the more restrictive model was used to indicate measurement invariance (Cheung & Rensvold, 2002).
+
+## Invariance Testing for Gender and Age
+
+The same measurement invariance testing procedure was applied to gender (boys and girls) and age groups (school-age, preadolescent, adolescent). Results indicated full measurement invariance was achieved across all groups. 
+
+# Discussion
+
+Results supported measurement invariance of the three GFI subscales across each group. Configural invariance indicated that the three-factor structure of the GFI was similar for all groups. Metric invariance indicated that factor loadings were similar in magnitude and scalar invariance indicated that item thresholds were equivalent across groups.
+
+The ability to demonstrate measurement invariance across demographic characteristics like race/ethnicity is crucial for ensuring that mental health tools provide valid and reliable assessments for youth with different backgrounds. This aligns with my work promoting culturally responsive care for marginalized youth, ensuring that interventions are equitable and based on accurate, unbiased assessments.
+
+#  Software & Packages Used
+> R Version: `r R.version.string`  
+> Packages: lavaan for SEM, flextable for reporting, and dplyr for data wrangling.  
+> Modeling Approach: Mean- and variance-adjusted weighted least squares estimator (WLSMV) was used, with categorical indicators and the theta parameterization method to achieve model identification.  
+
+# Citation  
+
+This report is an excerpt from the analyses conducted for the following published article:  
+Alvis, L., Oosterhoff, B., Hoppe, R., Giang, C., & Kaplow, J. B. (2024). Measurement invariance of the Grief Facilitation Inventory with respect to youth gender, race, ethnicity. *Death Studies*. https://doi.org/10.1080/07481187.2024.2355482   
+   
+The analysis builds on the original measurement validation paper:   
+Alvis, L., Dodd, C. G., Oosterhoff, B., Hill, R. M., Rolon-Arroyo, B., Logsdon, T., Layne, C. M., & Kaplow, J. B. (2020). Caregiver behaviors and childhood maladaptive grief: Initial validation of the Grief Facilitation Inventory. *Death Studies*, 1–9. https://doi.org/10.1080/07481187.2020.1841849   

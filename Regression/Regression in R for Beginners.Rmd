@@ -1,0 +1,433 @@
+---
+title: "Linear Regression in R: A Tutorial on Frequentist & Bayesian Approaches"
+author: "Lauren Alvis, PhD"
+date: "10/3/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+
+---
+
+#  Overview
+
+This tutorial provides a step-by-step guide to conducting linear regression analyses in R using two approaches: Frequentist (traditional) and Bayesian methods. It starts with a brief introduction to key R skills for data manipulation and analysis, then walks you through building, running, and interpreting regression models for each method.
+
+You’ll learn how to construct models, interpret outputs, and generate well-formatted tables and visualizations to present your findings clearly. By the end, you’ll be equipped to perform and effectively communicate linear regression analyses in both academic and applied research contexts.
+
+#  Install & Load Libraries 
+
+```{r setup, results=FALSE,warning=FALSE,message=FALSE}
+#these are the R packages (i.e., libraries) we'll use to run the analyses
+#you may need to each install package first, using `install.packages("[packagename]")`
+#you will only need to install each package once
+
+#load the library - you'll need to load these every time you open your R session:
+library(rio) #imports data
+library(ggplot2) #make pretty plots
+library(tidyverse) #manipulate data
+library(dplyr) #manipulate data 
+library(bayestestR) #get bayes factors
+library(rstanarm) #bayes regression (stan_glm)
+library(corrplot) #plot correlation matrix
+library(flextable) #make pretty reg tables
+library(officer) #prop_section function for saving table to word
+library(arsenal) #pretty descriptive tables
+library(sjPlot) #regression tables
+library(janitor) #data manipulation
+library(knitr) #kable html tables
+library(gt) #html tables
+```
+
+#  Read in data file 
+
+```{r echo=TRUE}
+df<-import("exdata.sav") # read in spss file 
+# note that rio::import can accommodate different file types
+```
+
+#  Subset, Clean, & Inspect Data
+
+```{r warning=FALSE, results=FALSE}
+# subset df to key study variables (easier for making descriptive tables):
+dat<-df %>% select(gfi_connectC, gfi_expressC, gfi_excontsupC, gfi_inhibitC, #k ey predictors
+                   PYD_Fut, PYD_Grat,  # key outcomes
+                   Age, gend, yearsSD, # youth demos
+                   Black, Latinx, White, COD_ShortDisease, # bereavement covariates
+              COD_LongDisease,COD_Accident, cod_violent)
+
+# tell R which variables are categorical by converting them to factor variables:
+dat$black.f<-factor(dat$Black,levels=c(0,1),labels=c("Not Black","Black"))
+dat$white.f<-factor(dat$White,levels=c(0,1),labels=c("Not White","White"))
+dat$latinx.f<-factor(dat$Latinx,levels=c(0,1),labels=c("Not Latinx","Latinx"))
+dat$gend.f <- factor(dat$gend, levels = c(0,1), labels = c("Male","Female"))
+# this is how you can convert a bunch of vars to factor at once without labels:
+names<-c(
+         'COD_LongDisease', 'COD_ShortDisease', 'COD_Accident', 'cod_violent')
+dat[,names] <- lapply(dat[,names] , factor)
+
+```
+
+## Descriptive Statistics
+
+Below is example code you can use to summarize relevant descriptives statistics (means, sd, frequencies, etc) for key variables.
+
+```{r results=FALSE}
+
+summary(dat) #shows you descriptive stats for dataframe; inspect to make sure mins/max, frequencies etc look right
+
+# get frequencies for categorical vars
+# note that 0 = no, 1 = yes
+dat %>% select(gend.f, black.f, white.f, latinx.f, 
+               COD_ShortDisease,
+              COD_LongDisease,COD_Accident, cod_violent) %>% map(., ~tabyl(.))
+
+# get means, sd, range descriptives for continuous vars
+dat %>% 
+  select(gfi_connectC, gfi_expressC, gfi_excontsupC, gfi_inhibitC,
+         PYD_Fut, PYD_Grat, 
+         Age, yearsSD) %>%
+  sapply(., function(x) round(c("Mean" = mean(x, na.rm = TRUE),
+                                "Stand dev" = sd(x, na.rm = TRUE), 
+                                "Minimum" = min(x, na.rm = TRUE),
+                                "Maximum" = max(x, na.rm = TRUE)), 2))
+```
+
+Descriptive Table (formatted)
+  
+```{r echo=FALSE, results="asis"}
+# Below formats key descriptives in nice table using arsenal package.
+mycontrols1 <- tableby.control(total=TRUE, test=FALSE,cat.simplify = FALSE,
+                               numeric.stats=c("meansd", "range", "Nmiss"),
+                               cat.stats=c("countpct","Nmiss"),
+                               stats.labels=list(N='Count', meansd='Mean (SD)', range='Range',countpct='N (Percent)', Nmiss="N Missing"))
+# pretty var labels
+labs <-list(Age = "Age", gend.f = "Gender", yearsSD = "Years Since Death",
+            gfi_connectC = "Ongoing Connection", gfi_expressC = "Grief Expression", gfi_excontsupC = "Exist Cont/Support", gfi_inhibitC = "Grief Inhibition/Avoidance",
+                   PYD_Fut = "Future-Orientation", PYD_Grat = "Gratitude")
+
+table1 <- tableby(~ Age + gend.f +  yearsSD + gfi_connectC + gfi_expressC +
+                    gfi_excontsupC + gfi_inhibitC + PYD_Fut + PYD_Grat,
+                  data = dat, 
+                  control=mycontrols1)
+
+tab1<-summary(table1, digits=2,digits.pct=1, text=T, labelTranslations=labs)
+kable(tab1)
+
+```
+
+
+##  Bivariate Correlations
+
+Examine associations between key variables. 
+
+Here is example code for various ways to examine correlations in R.
+
+```{r results=FALSE, echo=TRUE}
+
+sub<-dat %>% select(Age, #gend.f ##removing categorical vars from correlation matrix
+                    yearsSD,gfi_connectC,gfi_expressC,
+                    gfi_excontsupC,gfi_inhibitC,PYD_Fut,PYD_Grat) %>% na.omit()
+res <- cor(sub, use="complete.obs") #create correlation matrix
+round(res, 2) #show correlation matrix with numbers rounded 
+
+res2 <- Hmisc::rcorr(as.matrix(sub)) #alternative package for correlation package, shows p values
+res2
+```
+
+```{r warning=FALSE, message=FALSE, echo=TRUE}
+#visualize correlation matrix
+corrplot::corrplot(res, method = "color", type = "upper", 
+                   tl.col = "black", tl.srt = 45, 
+                   addCoef.col = "black", number.cex = 0.7) 
+
+```
+
+##  Visualize Distribution
+
+Visualize raw associations between independent variable (IV) and dependent variable (DV), showing univariate distribution of each in the margins.
+
+
+```{r echo=TRUE,message=FALSE, warning=FALSE}
+#example:
+d <- ggplot(dat, aes(gfi_expressC, PYD_Fut)) +
+  geom_smooth(color="darkgreen") +
+  geom_jitter(alpha=.2, color="darkgreen") +
+  ggtitle("Association Between Caregiver Grief Expression \n and Future-Orientation")+
+  xlab("Grief Expression") +
+  ylab("Future-Orientation") +
+  theme(
+    axis.title.x = element_text(margin = unit(c(5, 0, 0, 0), "mm")),
+    axis.title.y = element_text(margin = unit(c(0, 5, 0, 0), "mm")),
+    panel.background = element_rect(fill = "white", colour = "grey50"))
+d <-  ggExtra::ggMarginal(d, type = "density", fill="darkgreen", alpha=.5)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+d
+```
+
+#  Linear Regression Models
+
+Test your research question. In this example, we are interested in examining the extent to which caregiver grief facilitation behaviors are associated with two positive youth developmental outcomes: future-orientation and gratitude. Typically, we would include covariates, but to keep this demonstration simple, I've removed them from the models for now.
+
+##  Frequentist Approach
+
+###  Build The Model
+
+* Start by assigning a name to your model using the `<-` operator.   
+* Use the lm() function to specify the regression model.  
+* Inside lm(), here is how you build your model:  
+[Outcome Variable] ~ [Predictor1] + [Predictor2] + [covariate1] + [covariate2]..., data= [YourData]  
+* The data = [YourData] part is just telling R where to find the variables you're using. Make sure your dataset and variable name matches exactly—R is picky about that (**case-sensitive!**).   
+  
+* To see the results, I like using jtools::summ(). This function gives you a nice summary, showing the estimated effects (coefficients), how confident we are about these estimates (confidence intervals), and whether each predictor is statistically significant. Remember to use confint = TRUE to show those confidence intervals and digits = 3 to keep the numbers readable.  
+  
+```{r echo=TRUE, warning=FALSE, message=FALSE}
+
+# regression model examining the 4 GFI subscales as predictors of a positive 
+## youth development construct (Future Orientation)
+fmodel1 <- lm(PYD_Fut ~ gfi_connectC + gfi_expressC + gfi_excontsupC + gfi_inhibitC,
+                             data=dat) 
+jtools::summ(fmodel1, confint = TRUE, digits = 3) # view results
+
+# get the summary with standardized coefficients & confidence intervals to report in-text below.
+model_summary <- jtools::summ(fmodel1, 
+                              scale=T, confint = TRUE, digits = 3)
+coefficients <- model_summary$coeftable
+
+# run with gratitude as outcome...
+fmodel2 <-lm(PYD_Grat ~ gfi_connectC + gfi_excontsupC +
+               gfi_expressC + gfi_inhibitC, 
+            data=dat) 
+```
+  
+
+###  Interpret Results  
+   
+>* **Intercept:** The starting point of your outcome variable (e.g., Future Orientation or Gratitude) when all predictors are zero. It represents the baseline level.  
+>* **Coefficients (Estimates):** These show how much the outcome is expected to change with a one-unit change in a predictor, holding other variables constant. A positive coefficient means the outcome increases; a negative one means it decreases.  
+>* **Standard Error (SE):** Indicates the precision of your coefficient estimates. Smaller SE values mean more precise estimates, suggesting more confidence in the exact value of the coefficient.  
+>* **Confidence Intervals (CI):** The range within which the true effect size likely falls. If a CI does not include zero, it suggests a significant effect. A 95% CI means we are 95% confident the true coefficient is within this range.  
+>* **p-value and Significance Stars:** Indicate whether the effect is statistically significant. A p-value less than 0.05 (often marked with stars) suggests a "meaningful effect" of the predictor on the outcome from the frequentist approach.  
+  
+
+  
+**Sample Write-Up:** The linear regression model predicting future-orientation indicated that greater caregiver grief expression was significantly associated with *lower* future-orientation (β = `r round(coefficients["gfi_expressC", "Est."], 2)`, 95% CI [`r round(coefficients["gfi_expressC", "2.5%"], 2)`, `r round(coefficients["gfi_expressC", "97.5%"], 2)`]), whereas greater existential continuity and support was significantly associated with *higher* future-orientation (β = `r round(coefficients["gfi_excontsupC", "Est."], 2)`, 95% CI [`r round(coefficients["gfi_excontsupC", "2.5%"], 2)`, `r round(coefficients["gfi_excontsupC", "97.5%"], 2)`]).  
+  
+### Visualize Effects  
+ 
+Forest-plot of standardized coefficients.  
+  
+```{r echo=FALSE}
+plot_model(fmodel1, type = "std", show.values = TRUE, show.p = TRUE, ci.lvl = 0.95) +
+  theme_minimal()+ 
+  labs(title = "Std. Coefficient Plot for Regression Model1",
+       y = "Estimate", x = "Predictor Variables")+
+    theme(plot.title = element_text(size=12, hjust=0),
+        axis.title.x = element_text(size=10),
+        legend.position = "none", aspect.ratio=1,
+        panel.border = element_rect(color="black", fill=NA)) 
+
+```
+
+### Frequentist Regression Table
+  
+```{r echo=FALSE, results="asis", warning=FALSE, message=FALSE}
+
+tab_model(fmodel1, fmodel2, 
+          string.se = "SE",show.obs = T,
+          show.se = TRUE, p.style="stars",
+           dv.labels = c("Future-Orientation","Gratitude"),
+        pred.labels=list("(Intercept)"= "Intercept",
+                              "gfi_connectC" = "Ongoing Connection", "gfi_excontsupC" = "Existential Continuity/Support", 
+                             "gfi_expressC" = "Grief Expression", "gfi_inhibitC" = "Grief Inhibition"))
+
+```
+
+##  Bayesian Approach
+
+###  Build The Model
+
+For a Bayesian regression model, we use stan_glm() from the rstanarm package. It's the bayesian version of the lm() function:  
+ 
+NameTheModel<-stan_glm([Outcome Variable] ~ [Predictor1] + [Predictor2] + [covariate1] + [covariate2...], data=[YourData])
+
+
+```{r warning=FALSE, message=FALSE}
+
+# future orientation outcome
+model1 <- rstanarm::stan_glm(PYD_Fut ~gfi_connectC + gfi_expressC +
+                               gfi_excontsupC + gfi_inhibitC,
+                             data=dat) #bayes default is 4 chains, 2K iterations 
+
+# Summarize the results to see what we learned from the model:
+#bayestestR::describe_posterior(model1, rope_ci=1, ci=.95, test="all")
+
+# Save results for making a table or further analysis:
+m1 <- bayestestR::describe_posterior(model1, rope_ci=1, ci=.95, test="all") 
+posteriors1 <- insight::get_parameters(model1)
+
+# gratitude outcome
+model2 <- rstanarm::stan_glm(PYD_Grat ~  gfi_connectC + gfi_expressC + gfi_excontsupC + gfi_inhibitC,
+                             data=dat)
+#bayestestR::describe_posterior(model2, rope_ci=1, ci=.95, test="all")
+m2 <- bayestestR::describe_posterior(model2, rope_ci=1, ci=.95, test="all") 
+posteriors2 <- insight::get_parameters(model2)
+```
+  
+> **Key Differences from Frequentist Approach:**  
+  
+>* Prior Distributions: Before we even look at the data, Bayesian models let us factor in any prior knowledge or beliefs about our parameters. stan_glm() has default priors, but you can customize these if you have specific prior information.  
+>* Posterior Distributions: Instead of giving us just one "best guess" for each parameter, Bayesian models provide a range of possible values (a distribution), which can tell us much more about our uncertainty and the strength of our estimates.  
+>* Uncertainty and Credible Intervals: Think of these as our "comfort zones" where we believe the true value of a parameter is likely to be. A 95% credible interval means we're 95% sure the true value falls within this range, based on both our data and any prior beliefs.  
+
+
+###  Interpret Results
+  
+>* **Posterior Distributions:** These distributions give us a sense of all the possible values our parameters could take, based on the data we have. It's like having a range of "best guesses" instead of just one.
+>* **ROPE (Region of Practical Equivalence):** This is a fancy way of asking if the effect we're seeing is big enough to matter in the real world. If our entire credible interval is inside the ROPE, it suggests the effect is tiny or not practically significant. A ROPE% value of 1.00 indicates that the entire posterior distribution of the predictor's effect is within a range considered to be "practically equivalent to zero." In other words, the effect of the predictor is so small that it is effectively negligible from a practical standpoint. This suggests that the predictor likely does not have a meaningful impact on the outcome variable.
+>* **Credible Intervals (CI):** These intervals show where we believe the true parameter values are, given the data and our priors. A 95% credible interval means we're pretty confident (95% confident, to be exact!) that the true value falls within that range.
+
+
+### Plot Posterior Distributions 
+
+Plotting the posterior distributions helps us visualize the "spread" of possible values for each parameter. This spread shows us how certain or uncertain we are about our estimates and can help us understand the range of plausible effects.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+IC_p <- ggplot(posteriors1, aes(x = gfi_expressC)) +
+  ggtitle("Posterior Distribution for Effects of Grief Expression on Future Orientation")+
+  geom_density(fill = "indianred1") +
+ # annotate("text", x=-.25, y=4, label="97.17%", fontface="bold")+
+#  annotate("text", x=-.05, y=4, label="2.83%")+
+  xlab("Effect of Grief Expression Adjusting for Covariates") +
+  ylab("Density") +
+  scale_y_continuous(limits = c(0,25)) +
+  scale_x_continuous(breaks=c(-.30, -.25, -.2, -.15, -.1, -.05, 0, .05, .1, .15)) +
+  geom_segment(aes(x = median(posteriors1$gfi_expressC), y = 0, xend = median(posteriors1$gfi_expressC), 
+                   yend = 24), linetype="dashed", size=1)+
+  geom_segment(aes(x = .092, y = 0, xend = .092, yend = 20))+
+  geom_segment(aes(x = -.092, y = 0, xend = -.092, yend = 20))+
+  theme_classic()+
+  theme(axis.title.x = element_text(margin = unit(c(5, 0, 0, 0), "mm")),
+        axis.title.y = element_text(margin = unit(c(0, 5, 0, 0), "mm"))) +
+  ggpubr::geom_bracket(
+    xmin = -.092, xmax = .092,
+    y.position = 25, label = c("Region of Practical Equivalence"),
+    tip.length = 0.02) +
+  ggpubr::geom_bracket(
+    xmin = median(posteriors1$gfi_expressC), xmax = median(posteriors1$gfi_expressC),
+    y.position = 24, label = c("Median"),
+    tip.length = 0.0)
+IC_p
+```
+  
+This plot helps us visualize the possible effects of grief expression on future orientation, after considering other variables. The dashed line shows the median (most likely value) of the effect, and the shaded area near zero represents the ROPE, which helps us decide if the effect is meaningful or not.
+
+### Compare Posteriors
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+bayesplot::mcmc_areas(posteriors1, pars = c("gfi_connectC", "gfi_expressC")) +
+  ggtitle("Posterior Distributions with 95% Credible Intervals")
+
+```
+
+
+### Bayesian Regression Table
+
+Create Bayesian Regression Table with `gt` for HTML Output
+
+```{r echo=FALSE, results='asis', warning=FALSE, message=FALSE}
+
+# Round function for numeric columns in a data frame
+round_df <- function(df, digits) {
+  # Round all numeric variables in a data frame to specified digits
+  numeric_cols <- sapply(df, is.numeric)
+  df[numeric_cols] <- round(df[numeric_cols], digits)
+  return(df)
+}
+
+# Select models to pull results from
+model_summaries <- list(m1, m2) 
+selected_cols <- c("Parameter", "Median", "CI_low", "CI_high", "pd", "ROPE_Percentage", "log_BF")
+
+# Pull the relevant results from each model summary and create data frames
+tables <- lapply(model_summaries, function(m) data.frame(m) %>% select(all_of(selected_cols)))
+
+# Combine data frames while keeping "Parameter" in the first table and removing it from the second
+modresults <- do.call(cbind, lapply(seq_along(tables), function(i) {
+  if (i == 1) {
+    # Keep the "Parameter" column for the first table
+    tables[[i]]
+  } else {
+    # Remove the "Parameter" column from subsequent tables
+    tables[[i]][, -1]
+  }
+})) %>% round_df(., 2)
+
+# Adjust the column names to match the number of columns in modresults
+colnames(modresults) <- make.names(colnames(modresults), unique = TRUE)
+
+# Convert the data frame to a gt table
+gt_table <- modresults %>%
+  gt() %>%
+  tab_header(
+    title = "Bayesian Regression Results",
+    subtitle = "Displaying Results for Future Orientation and Gratitude"
+  ) %>%
+  tab_spanner(
+    label = "Future-orientation",
+    columns = 2:7
+  ) %>%
+  tab_spanner(
+    label = "Gratitude",
+    columns = 8:13
+  ) %>%
+  fmt_number(
+    columns = 2:13,
+    decimals = 2
+  ) %>%
+  tab_footnote(
+    footnote = "CI = Credible Interval. 
+                pd = Probability of Direction. 
+                ROPE % = Region of Practical Equivalence Percentage.
+    BF = Bayes Factor.",
+    locations = cells_title()
+  ) %>%
+  cols_label(
+    Parameter = "Parameter",
+    Median = "Median",
+    CI_low = "95% CI Lower",
+    CI_high = "95% CI Upper",
+    pd = "pd",
+    ROPE_Percentage = "ROPE %",
+    log_BF = "BF",
+    Median.1 = "Median",
+    CI_low.1 = "95% CI Lower",
+    CI_high.1 = "95% CI Upper",
+    pd.1 = "pd",
+    ROPE_Percentage.1 = "ROPE %",
+    log_BF.1 = "BF",
+    
+  )
+
+# Render the table in HTML output
+gt_table
+
+```
+    
+> Below is a detailed overview of how to make sense of the information in the table.  
+> 
+>* **Parameter:** This is just the name of the predictor (or variable) we’re looking at. It tells us which variable we’re analyzing to see if it has an effect on the outcome. Think of it as the “what” in your model.
+>* **Median:** This is like the "middle point" of all the possible values our model thinks a parameter could be. It’s our best guess of the true effect size. For example, if the median for a predictor is 0.5, it suggests that, on average, increasing this predictor by one unit is associated with a 0.5 unit change in the outcome.
+>* **95% CI Lower and Upper:** These two columns show the range where we believe the true effect size is likely to be, based on our data. If these numbers are close together, we’re quite confident about our guess. If they’re far apart, there’s more uncertainty. So, if a predictor’s 95% CI is from 0.1 to 0.9, we’re 95% sure the true effect is somewhere in that range.
+>* **pd (Probability of Direction):** This tells us how sure we are about the direction of the effect—whether it's positive (going up) or negative (going down). A pd of 100% means we’re completely confident in the direction of the effect. For example, if pd is 98%, we’re 98% sure the effect is positive (or negative, depending on the context).
+>* **ROPE % (Region of Practical Equivalence Percentage):** This tells us how much of our model's possible effects are so small that they don't really matter in a practical sense. A ROPE % of 1.00 (or 100%) means that the effect is entirely within a range that we consider "practically zero." In simpler terms, if ROPE % is very high, it means the predictor’s effect is so tiny that it probably isn’t making a real-world difference.
+>* **BF (Bayes Factor):** This gives us a measure of evidence. A BF greater than 1 suggests that there is more evidence for the effect than against it. Conversely, if BF is less than 1, there's more evidence suggesting there might not be an effect. Think of it like a scale—if it tips past 1, it favors the presence of an effect, and if it’s below 1, it leans towards no effect.
+>  
+> When you look at the table, start by checking the Median to see what the most likely effect size is. Then, glance at the 95% CI to see how certain we are about this effect. If the interval is narrow, we have more confidence. Check the pd to see if we’re sure about the direction of the effect. Look at ROPE % to determine if the effect is big enough to matter, and finally, see the BF for an overall sense of the evidence for or against the effect.
+> Bayesian results aren’t just about “is there an effect?” but also about “how strong is the evidence for an effect, and does it matter in the real world?”.
+

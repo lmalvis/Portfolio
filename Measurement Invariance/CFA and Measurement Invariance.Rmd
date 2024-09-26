@@ -49,9 +49,13 @@ library(semPlot) # plot cfa
 library(semptools) # customize cfa plot
 ```
 
-```{r}
+```{r results=FALSE}
 # read in data
-import("GFI.sav")
+GFIraw<-import("gfi.sav") %>%
+  filter(!is.na(racegrp))
+
+GFI2 <- mice::mice(GFIraw, m=5, maxit = 50, seed = 500)
+GFI <- mice::complete(GFI2) #turns 'mids' into dataframe
 
 # Subset datasets for each group
 datasets <- list(
@@ -60,8 +64,8 @@ datasets <- list(
   latinx_youth = GFI %>% filter(racegrp == "Latinx"),
   white_youth = GFI %>% filter(racegrp == "White"),
   mixed_youth = GFI %>% filter(racegrp == "Mixed"),
-  boys = GFI %>% filter(gend == "Boy"),
-  girls = GFI %>% filter(gend == "Girl"),
+  boys = GFI %>% filter(gend == 2),
+  girls = GFI %>% filter(gend == 1),
   school_age = GFI %>% filter(agegrp == "School age"),
   preadolescent = GFI %>% filter(agegrp == "Preadol"),
   adolescent = GFI %>% filter(agegrp == "Adol")

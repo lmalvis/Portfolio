@@ -1,4 +1,4 @@
-# Portfolio   
+# R Portfolio   
 Welcome to my Data Analysis Portfolio! This collection highlights my expertise in R, statistical analysis, data management, and data visualization through a series of RMarkdown (.Rmd) projects. Each project showcases different analytical techniques, with detailed code and explanations to help you follow along or apply similar approaches to your own work.
 
 ## About This Portfolio  

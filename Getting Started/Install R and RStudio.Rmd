@@ -45,7 +45,7 @@ knitr::include_graphics("downloadRstudioscreenshot.png")
 
 # Install packages  
 
-Install a few commonly used packages using `install.packages("packagename")  
+Open RStudio. In the console, you can install a few commonly used packages using `install.packages("<packagename>")`  
 
 ```{r eval=FALSE}
 packageList<-c("tidyverse", "janitor", "dplyr", "ggplot2")

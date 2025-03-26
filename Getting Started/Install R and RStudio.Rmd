@@ -33,7 +33,6 @@ knitr::include_graphics("downloadRscreenshot.png")
 # Install RStudio
   
 Now that R is installed, you can install [Rstudio](https://posit.co/download/rstudio-desktop/)  
-  
 
 ```{r download-rstudio-img, echo=FALSE,  out.width = '50%'}
 knitr::include_graphics("downloadRstudioscreenshot.png")
@@ -43,24 +42,47 @@ knitr::include_graphics("downloadRstudioscreenshot.png")
 - Run the installation file.  
   
 
-# Install packages  
+# Create an R Script File 
 
-Open RStudio. In the console, you can install a few commonly used packages using `install.packages("<packagename>")`  
+Now that you've install the software, go ahead and open RStudio. Click the green + button in the top left corner and select "R Script" or click File, go to "New File", and select "R Script". 
+
+# Install Packages
+
+We need to use various "packages" to perform different functions in R. When its your first time using R, you'll need to install any packages you'll want to use before you can "load" (i.e., use) them.  
+
+> In the console (or in your r script file if you want to save the code for later), use: 
+> 
+>- `install.packages("[packagename]", dependencies = TRUE)` for installing one package  
+>- `install.packages(c("[packagename1]","[packagename2]","[packagename3]",..., dependencies = TRUE)` for installing multiple packages at once.  
+> 
+> After its installed, you can "load" your package using:
+> 
+>- `library([packagename])`  
+>
+> You will only need to install each package once, but will need to load each package every session.   
+  
+I've included code below that creates a function you can use that will loop through each package to check if it's installed, install it if it is not, and then load it.   
+Keep in mind that R is ***case-sensitive***, so make sure the package names are exact.  
+
 
 ```{r eval=FALSE}
-packageList<-c("tidyverse", "janitor", "dplyr", "ggplot2")
+# List of packages
+packageList <- c("tidyverse", "janitor", "dplyr", "ggplot2")
 
-# checks if each package is installed; if not, install it
-for (pkg in packages) {
+# Loop through the list and check if each package is installed
+for (pkg in packageList) {
   if (!require(pkg, character.only = TRUE)) {
+    cat("Installing package:", pkg, "\n")
     install.packages(pkg, dependencies = TRUE)
+    library(pkg, character.only = TRUE)
+  } else {
+    cat("Package already installed:", pkg, "\n")
     library(pkg, character.only = TRUE)
   }
 }
-
 ```
 
-You can also install rmarkdown to create want to create dynamic documents that combine code, text, and rendered output in R.  
+You can also install rmarkdown if you want to create dynamic documents/reports that combine code, text, and rendered output in R.  
 
 ```{r eval=FALSE}
 install.packages("rmarkdown", dependencies = TRUE)

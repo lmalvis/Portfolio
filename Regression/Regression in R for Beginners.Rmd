@@ -18,12 +18,11 @@ This tutorial provides a step-by-step guide to conducting linear regression anal
 
 You’ll learn how to construct models, interpret outputs, and generate well-formatted tables and visualizations to present your findings clearly. By the end, you’ll be equipped to perform and effectively communicate linear regression analyses!
 
-#  Install & Load Libraries 
+#  Load Libraries 
 
-We need to use various "packages" to perform different functions in R. You may need to each install package first if this is your first time in R -- use `install.packages("[packagename]", dependencies = TRUE)` or `install.packages(c("[packagename1]","[packagename2]","[packagename3]",..., dependencies = TRUE)`  
+If this is your first time in R, open [this R script for installing required packages for this tutorial](https://lmalvis.github.io/Portfolio/Regression/install-packages-code.R).  
   
-You will only need to install each package once, but will need to load each package every session (see below). 
-
+You only need to install packages one time, but need to load each package every session (see below). 
 
 ```{r setup, results=FALSE,warning=FALSE,message=FALSE}
 knitr::opts_chunk$set(
@@ -32,23 +31,24 @@ knitr::opts_chunk$set(
   warning = FALSE    # hide warnings to keep output clean
 )
 
-# Load packages
+
+########### Load Packages ################
 library(rio) #import data
 
-## manipulate data  packages
+## manipulate data
 library(plyr) 
 library(dplyr) 
 library(tidyverse) 
-library(janitor) #tabyl frequences function
+library(janitor) # tabyl frequences function
 
-## plots 
-library(ggplot2) # make pretty plots
+## plotting 
+library(ggplot2) 
 library(corrplot) # plot correlation matrix
 
-## custom table packages
+## custom tables 
 library(arsenal) # pretty descriptive tables
 library(knitr) # kable html tables
-library(gt) #tables
+library(gt) # tables
 library(flextable) # pretty custom tables
 library(officer) # customize word doc tables flexibly 
 
@@ -58,8 +58,8 @@ library(rstanarm) # bayes regression (stan_glm)
 library(bayestestR) # bayes regression (stan_glm)
 library(bayesplot) # plot bayes
 library(sjPlot) # regression tables
-library(lm.beta) #std regression coef
-library(jtools) #summ fn summary of reg results with CI 
+library(lm.beta) # std regression coef
+library(jtools) # summ fn summary of reg results with CI 
 
 ```
 
@@ -68,15 +68,14 @@ library(jtools) #summ fn summary of reg results with CI
 ## Read in data 
 
 ```{r results=FALSE}
-df<-import("exdata2.sav") # read in spss file 
+df<-rio::import("exdata2.sav") # read in spss file 
 # rio::import can accommodate different file types
-str(df) 
 ```
 
 ## Clean data  
 
 ```{r results=FALSE}
-# subset to key variables
+# subset dataset to include just the variables you're interested in
 dat <- df %>% 
   select(
  age,gend, racesimp3, black,latinx,white, #demographics 
@@ -89,24 +88,27 @@ dat <- df %>%
                    ptsd_symp #ptsd symptoms 
   )
 
-# tell R which variables are categorical by converting them to factor variables w/ intuitive labels:
+# tell R which variables are categorical by converting them to "factor" variables and assign intuitive value labels for each category:  
 dat$gend.f<-factor(dat$gend, levels=c(0,1),
                        labels=c("Boy", "Girl"))
-dat$racesimp3.f<-factor(dat$racesimp3, levels=c("White","Mixed","Latino/a/x","Black"))
-dat$cod.f<-factor(dat$cod, 
-                  levels=c("Long-term illness","Sudden/short-term illness","Accident","Homicide","Suicide","Other Causes"))
-dat <- dat %>% select(-c(cod,gend,racesimp3)) #remove original from dataset
 
-# or you can convert multiple cols at once 
+dat$racesimp3.f<-factor(dat$racesimp3, levels=c("White","Mixed","Latino/a/x","Black"))
+
+dat$cod.f<-factor(dat$cod, 
+                  levels=c("Long-term illness","Short-term illness","Accident","Homicide","Suicide","Other Causes"))
+
+dat <- dat %>% select(-c(cod,gend,racesimp3)) # use "-c" to remove specific columns from dataset, in this case, removing the original variables
+
+# or you can convert multiple columns at once 
 #(useful when they have the same levels/labels)
-names <- c("black","latinx", "white", "bereave",
+binary_vars <- c("black","latinx", "white", "bereave",
                        "cod_st", "cod_lt","cod_acc",
                            "cod_murd","cod_sui","cod_vio")
 dat <- dat %>% 
-  mutate(across(all_of(names), ~ factor(., 
+  mutate(across(all_of(binary_vars), ~ factor(., 
                                         labels = c("No","Yes")), 
-                .names = "{.col}.f"))%>%
-  select(-all_of(names)) 
+                .names = "{.col}.f"))%>% #assign new factor var names ending in ".f"
+  select(-all_of(binary_vars)) 
 ```
   
 ## Inspect Data  
@@ -116,14 +118,13 @@ dat <- dat %>%
 Summarize descriptives statistics (mean, sd, frequency, ranges, missing data) for key variables and inspect to make sure it looks appropriate given the variables.  
   
 ```{r results=FALSE}
-# structure of dataset:
+# structure of dataset
 str(dat) 
+# preview data
 head(dat) 
 
-# summarize descriptive stats for all vars 
+# summarize descriptive statistics for all vars in dat
 summary(dat)
-
-
 ```
 
 Or you can use the arsenal package to nicely formats key descriptives in a pretty table...
@@ -140,6 +141,7 @@ mycontrols1 <- tableby.control(total=TRUE, test=T,
                                               range='Range',
                                               countpct='N (Percent)',
                                               Nmiss="Missing"))
+
 # pretty var labels 
 var_labels <- c(
   racesimp3.f = "Race/Ethnicity",
@@ -157,7 +159,7 @@ var_labels <- c(
 )
 attr(dat, "labels") <- var_labels
 
-# tell it which variables to put in table
+# list the variables to include in the table after "~" separated by "+" 
 table1 <- tableby(~ age + gend.f +  racesimp3.f + cod.f + bereave.f +
                     pgd_timesince +
                     traumatotNB + belong +
@@ -174,7 +176,7 @@ kable(tab1)
 
 ```{r include=FALSE, eval=FALSE, results=FALSE}
 
-#You can also subset the table by a grouping variable...
+# You can subset the table by a grouping variable when you put it before the "~" 
 
 table1a <- tableby(racesimp3.f ~ cod.f + bereave.f +
                     traumatotNB + belong +
@@ -191,10 +193,11 @@ kable(tab1a)
 Another step for getting familiar with your data is to examine the correlations among your continuous variables.  
  
 ```{r results=FALSE}
-sub <-dat %>% select(-c(ends_with(".f"))) %>% na.omit() #removing categorical vars 
+sub <-dat %>% select(-c(ends_with(".f"))) %>% na.omit() #removing categorical vars
 
 Hmisc::rcorr(as.matrix(sub)) #nice package for corr matrix w/ p values
 ```
+
 ### Correlations by Subgroup{.tabset}
 
 Sometimes we might want to inspect what the correlations look like across subgroups...  
@@ -262,12 +265,12 @@ plot_correlation(m, "Mixed")
 plot_correlation(w, "White")
 ```
 
-##  Scatterplots
+###  Scatterplots
 
 Inspect raw associations between independent variable (IV) and dependent variable (DV) via scatterplots with univariate distribution of each variable in the margins.
 
 We're looking for skewness, kurtosis, outliers, etc. 
-
+  
 ```{r class.source = "fold-hide"}
 #example scatter plot:
 d <- ggplot(dat, aes(belong, ptsd_symp)) +
